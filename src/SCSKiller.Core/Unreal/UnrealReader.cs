@@ -1088,11 +1088,14 @@ public sealed partial class UnrealReader(string? dataDir = null) : IEngineReader
     /// <summary>Forks on an older engine than their containers tell, with the version those tell and the names (normalized as
     /// <see cref="DetectFork"/> does) a folder, exe or store title must equal: Dead Island 2 is Dambuster's 4.25 (its root
     /// signatures carry 4.25's static samplers, s1000-s1005 in space 0) in 4.27's IoStore containers. Wuthering Waves is Kuro's
-    /// 4.26 in paks of version 11 or later, which tell 4.27: CUE4Parse decodes its pak entries only as that fork.</summary>
+    /// 4.26 in paks of version 11 or later, which tell 4.27: CUE4Parse decodes its pak entries only as that fork. PUBG:
+    /// BATTLEGROUNDS is Krafton's 4.16 (its pak entries name their compression method differently) in version 7 paks, which
+    /// tell 4.21; its folder is PUBG and its exe TslGame.exe.</summary>
     static readonly (EGame Fork, EGame Containers, string[] Names)[] OlderBase =
     [
         (EGame.GAME_DeadIsland2, EGame.GAME_UE4_27, ["deadisland2", "deadisland"]),
         (EGame.GAME_WutheringWaves, EGame.GAME_UE4_27, ["wutheringwaves", "wutheringwavesgame"]),
+        (EGame.GAME_PlayerUnknownsBattlegrounds, EGame.GAME_UE4_21, ["pubg", "tslgame", "pubgbattlegrounds", "playerunknownsbattlegrounds"]),
     ];
 
     /// <summary>Known forks: a CUE4Parse EGame whose name matches the install folder or exe name (roman numerals as digits)

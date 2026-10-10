@@ -348,6 +348,18 @@ public class UnrealReaderTests(ITestOutputHelper output)
         return (new Game($"test:{name}", "Proj", Store.Other, install, exe), paks);
     }
 
+    /// <summary>PUBG: BATTLEGROUNDS ships version 7 paks (they tell 4.21) on Krafton's 4.16 fork, under PUBG\ with TslGame.exe;
+    /// an anti-cheat game, so only the containers tell its version.</summary>
+    [Fact]
+    public void PubgIsKraftons416Fork()
+    {
+        const CUE4Parse.UE4.Versions.EGame Ue421 = CUE4Parse.UE4.Versions.EGame.GAME_UE4_21, Pubg = CUE4Parse.UE4.Versions.EGame.GAME_PlayerUnknownsBattlegrounds;
+        Assert.Equal(Pubg, UnrealReader.DetectFork(Ue421, 0, "PUBG", "TslGame", fromContainers: true, title: "PUBG: BATTLEGROUNDS"));
+        Assert.Equal(Pubg, UnrealReader.DetectFork(Ue421, 0, "Content", "Game", fromContainers: true, title: "PUBG: BATTLEGROUNDS"));
+        Assert.Null(UnrealReader.DetectFork(CUE4Parse.UE4.Versions.EGame.GAME_UE4_27, 0, "PUBG", "TslGame", fromContainers: true));
+        Assert.Null(UnrealReader.DetectFork(Ue421, 0, "PUBG", "TslGame", fromContainers: false));
+    }
+
     /// <summary>Dead Island 2 ships 4.27's IoStore containers on Dambuster's 4.25 fork: it is that fork, so it gets 4.25's rule,
     /// when its folder, exe or title is exactly its name and only the containers told the version.
     /// Its recording's most used root signature (a VS with 3 constant buffers, a PS with 2) is what that rule serializes,

@@ -1,6 +1,6 @@
 # Throwaway diagnostic for PUBG (not for upstream): walks a pak's entries from byte 0 without its encrypted index,
 # decompresses them with the Oodle DLL SCSKiller's build downloaded, and counts what is inside. Reads files only.
-param([string]$Paks = "C:\Program Files (x86)\Steam\steamapps\common\PUBG\TslGame\Content\Paks", [int]$Seconds = 60,
+param([switch]$Encrypted, [string]$Paks = "C:\Program Files (x86)\Steam\steamapps\common\PUBG\TslGame\Content\Paks", [int]$Seconds = 60,
       [string[]]$Names = @("pakchunk0-WindowsNoEditor.pak", "pakchunk0-WindowsNoEditor_etc.pak", "pakchunk0-WindowsNoEditor_fx.pak",
                            "pakchunk0-WindowsNoEditor_bps.pak", "pakchunk0-WindowsNoEditor_assets_world.pak", "pakchunk0-WindowsNoEditor_mutable.pak"))
 $oodle = Join-Path $env:LOCALAPPDATA "SCSKiller-build\codecs\oodle-data-shared.dll"
@@ -37,7 +37,9 @@ public static class PakWalk {
     e.Next = at;
     return e;
   }
-  public static string Walk(string path, int maxSec) {
+  public static string Walk(string path, int maxSec) { return Walk(path, maxSec, false); }
+  public static string Walk(string path, int maxSec, bool headersOnly) {
+    var encList = new List<string>(); long encBytes = 0;
     var sw = Stopwatch.StartNew(); var sb = new StringBuilder(); var methods = new SortedDictionary<int, int>();
     long entries = 0, encrypted = 0, failed = 0, packages = 0, dxbc = 0, withDxbc = 0, zlibInPackages = 0, skipped = 0, pos = 0;
     long gaps = 0, gapBytes = 0, maxGap = 0, at2k = 0, at4k = 0, at64k = 0;
@@ -53,15 +55,17 @@ public static class PakWalk {
         if (e == null) {  // padding: the next header within 1 MB (its offset field is 8 zero bytes)
           long limit = Math.Min(dataEnd, pos + (1 << 20)), found = -1;
           var win = new byte[(int)(limit - pos)]; f.Seek(pos, SeekOrigin.Begin); int got = f.Read(win, 0, win.Length);
-          for (int i = 1; i + 8 <= got && found < 0; i++)
-            if (BitConverter.ToInt64(win, i) == 0 && (e = Read(f, r, pos + i, dataEnd)) != null) found = pos + i;
+          for (int pass = 0; pass < 2 && found < 0; pass++)
+            for (int i = pass == 0 ? (int)(2048 - pos % 2048) % 2048 : 1; i + 8 <= got && found < 0; i += pass == 0 ? 2048 : 1)
+              if (i > 0 && (pass == 0 || (pos + i) % 2048 != 0) && BitConverter.ToInt64(win, i) == 0 && (e = Read(f, r, pos + i, dataEnd)) != null) found = pos + i;
           if (found < 0) { stop = string.Format("lost track at {0}: no entry within 1 MB", pos); break; }
           gaps++; gapBytes += found - pos; maxGap = Math.Max(maxGap, found - pos);
           if (found % 2048 == 0) at2k++; if (found % 4096 == 0) at4k++; if (found % 65536 == 0) at64k++;
           pos = found;
         }
         entries++; int m; methods[e.Method] = methods.TryGetValue(e.Method, out m) ? m + 1 : 1;
-        if (e.Enc != 0) encrypted++;
+        if (e.Enc != 0) { encrypted++; encBytes += e.Size; if (encList.Count < 10) encList.Add(string.Format("{0:N0} B (stored {1:N0}, method 0x{2:x}) at {3}", e.USize, e.Size, e.Method, pos)); }
+        else if (headersOnly) { }
         else if (e.USize > (256L << 20)) skipped++;
         else {
           var data = new byte[e.USize]; bool ok = true;
@@ -89,12 +93,24 @@ public static class PakWalk {
     sb.AppendFormat("{0}: {1} entries, {2:P1} of the file walked, stopped: {3}, {4:F0}s\n", Path.GetFileName(path), entries, pos / (double)Math.Max(1, new FileInfo(path).Length), stop, sw.Elapsed.TotalSeconds);
     sb.Append("  methods:"); foreach (var kv in methods) sb.AppendFormat(" 0x{0:x}={1}", kv.Key, kv.Value);
     sb.AppendFormat("\n  padding: {0} gaps, {1} bytes, largest {2}; next entry on 2K {3}, 4K {4}, 64K {5}\n", gaps, gapBytes, maxGap, at2k, at4k, at64k);
+    if (encrypted > 0) { sb.AppendFormat("  ENCRYPTED: {0} files, {1:N0} bytes stored\n", encrypted, encBytes); foreach (var x in encList) sb.Append("    " + x + "\n"); }
+    if (headersOnly) return sb.ToString();
     sb.AppendFormat("  encrypted {0}, too big {1}, decompress failed {2}, packages {3}, zlib marks in packages {4}\n  DXBC: {5} containers in {6} files\n", encrypted, skipped, failed, packages, zlibInPackages, dxbc, withDxbc);
     return sb.ToString();
   }
 }
 '@
 if (-not ("PakWalk" -as [type])) { Add-Type -TypeDefinition ($src -replace 'oodle-not-used', $oodle) }
+if ($Encrypted) {  # every pak, headers only: which files are encrypted, and how big
+    $all = Get-ChildItem $Paks -Filter *.pak | Sort-Object Name; $i = 0
+    foreach ($p in $all) {
+        $i++; Write-Progress -Activity "Walking pak headers" -Status $p.Name -PercentComplete (100 * $i / $all.Count)
+        $out = [PakWalk]::Walk($p.FullName, $Seconds, $true)
+        if ($out -match 'ENCRYPTED|lost track|no v4 footer') { $out }
+    }
+    "$($all.Count) paks walked"
+    return
+}
 foreach ($n in $Names) {
     $p = Join-Path $Paks $n
     if (Test-Path $p) { [PakWalk]::Walk($p, $Seconds) } else { "$n : not found" }

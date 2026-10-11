@@ -1,6 +1,6 @@
 # Throwaway diagnostic for PUBG (not for upstream): walks a pak's entries from byte 0 without its encrypted index,
 # decompresses them with the Oodle DLL SCSKiller's build downloaded, and counts what is inside. Reads files only.
-param([switch]$Encrypted, [switch]$Scan, [string]$Paks = "C:\Program Files (x86)\Steam\steamapps\common\PUBG\TslGame\Content\Paks", [int]$Seconds = 60,
+param([switch]$Encrypted, [switch]$Scan, [switch]$All, [string]$Paks = "C:\Program Files (x86)\Steam\steamapps\common\PUBG\TslGame\Content\Paks", [int]$Seconds = 60,
       [string[]]$Names = @("pakchunk0-WindowsNoEditor.pak", "pakchunk0-WindowsNoEditor_etc.pak", "pakchunk0-WindowsNoEditor_fx.pak",
                            "pakchunk0-WindowsNoEditor_bps.pak", "pakchunk0-WindowsNoEditor_assets_world.pak", "pakchunk0-WindowsNoEditor_mutable.pak"))
 $oodle = Join-Path $env:LOCALAPPDATA "SCSKiller-build\codecs\oodle-data-shared.dll"
@@ -125,7 +125,9 @@ if ($Encrypted) {  # every pak, headers only: which files are encrypted, and how
     return
 }
 if ($Scan) {  # every pak but textures, sound, localization and animations, decompressed: where the shaders are
-    $all = Get-ChildItem $Paks -Filter *.pak | Where-Object Name -notmatch '_tex|_sound|_localize|_animations' | Sort-Object Length; $i = 0
+    $skip = if ($All) { '^$' } else { '_tex|_sound|_localize|_animations' }
+    $all = Get-ChildItem $Paks -Filter *.pak | Where-Object { $All -or $_.Name -notmatch $skip } | Sort-Object Length; $i = 0
+    if ($All) { $all = $all | Where-Object Name -match '_tex|_sound|_localize|_animations' }  # the ones -Scan left out
     $sw = [Diagnostics.Stopwatch]::StartNew()
     foreach ($p in $all) {
         $i++; Write-Progress -Activity "Scanning paks ($i of $($all.Count), $([int]$sw.Elapsed.TotalMinutes) min)" -Status $p.Name -PercentComplete (100 * $i / $all.Count)

@@ -1,6 +1,6 @@
 # Throwaway diagnostic for PUBG (not for upstream): walks a pak's entries from byte 0 without its encrypted index,
 # decompresses them with the Oodle DLL SCSKiller's build downloaded, and counts what is inside. Reads files only.
-param([switch]$Encrypted, [string]$Paks = "C:\Program Files (x86)\Steam\steamapps\common\PUBG\TslGame\Content\Paks", [int]$Seconds = 60,
+param([switch]$Encrypted, [switch]$Scan, [string]$Paks = "C:\Program Files (x86)\Steam\steamapps\common\PUBG\TslGame\Content\Paks", [int]$Seconds = 60,
       [string[]]$Names = @("pakchunk0-WindowsNoEditor.pak", "pakchunk0-WindowsNoEditor_etc.pak", "pakchunk0-WindowsNoEditor_fx.pak",
                            "pakchunk0-WindowsNoEditor_bps.pak", "pakchunk0-WindowsNoEditor_assets_world.pak", "pakchunk0-WindowsNoEditor_mutable.pak"))
 $oodle = Join-Path $env:LOCALAPPDATA "SCSKiller-build\codecs\oodle-data-shared.dll"
@@ -9,7 +9,17 @@ $src = @'
 using System; using System.IO; using System.IO.Compression; using System.Runtime.InteropServices; using System.Collections.Generic; using System.Diagnostics; using System.Text;
 public static class PakWalk {
   [DllImport(@"oodle-not-used")] static extern long OodleLZ_Decompress(byte[] src, long srcLen, byte[] dst, long dstLen, int fuzz, int crc, int verb, IntPtr a, long b, IntPtr c, IntPtr d, IntPtr e, long f, int g);
-  static int Count(byte[] b, int n, byte[] pat) { int c = 0; for (int i = 0; i + pat.Length <= n; i++) { int k = 0; while (k < pat.Length && b[i + k] == pat[k]) k++; if (k == pat.Length) c++; } return c; }
+  static int Count(byte[] b, int n, byte[] pat) {
+    int c = 0, i = 0;
+    while (i + pat.Length <= n) {
+      int j = Array.IndexOf(b, pat[0], i, n - pat.Length + 1 - i); if (j < 0) break;
+      int k = 1; while (k < pat.Length && b[j + k] == pat[k]) k++;
+      if (k == pat.Length) c++; i = j + 1;
+    }
+    return c;
+  }
+  static readonly byte[] BasePass = Encoding.ASCII.GetBytes("BasePassPS"), GlobalCache = Encoding.ASCII.GetBytes("GlobalShaderCache"),
+    ShaderCode = Encoding.ASCII.GetBytes("ShaderCode"), ShaderArchive = Encoding.ASCII.GetBytes("ShaderArchive");
   static readonly byte[] Dxbc = Encoding.ASCII.GetBytes("DXBC"), Tag = { 0xC1, 0x83, 0x2A, 0x9E }, Zlib = { 0x78, 0x9C };
   sealed class Entry { public long Hdr, Size, USize, Next; public int Method, Enc; public uint Bs; public List<long[]> Blocks = new List<long[]>(); }
   // An in-data FPakEntry (v4: absolute block offsets) at p that is really one: offset field 0, sizes that fit, compressed
@@ -42,7 +52,7 @@ public static class PakWalk {
     var encList = new List<string>(); long encBytes = 0;
     var sw = Stopwatch.StartNew(); var sb = new StringBuilder(); var methods = new SortedDictionary<int, int>();
     long entries = 0, encrypted = 0, failed = 0, packages = 0, dxbc = 0, withDxbc = 0, zlibInPackages = 0, skipped = 0, pos = 0;
-    long gaps = 0, gapBytes = 0, maxGap = 0, at2k = 0, at4k = 0, at64k = 0;
+    long basePass = 0, basePassFiles = 0, globalCache = 0, shaderCode = 0, biggest = 0; string biggestAt = ""; long gaps = 0, gapBytes = 0, maxGap = 0, at2k = 0, at4k = 0, at64k = 0;
     string stop = "end of data";
     using (var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
       var r = new BinaryReader(f);
@@ -85,6 +95,8 @@ public static class PakWalk {
             int n = (int)e.USize, c = Count(data, n, Dxbc);
             if (n >= 4 && data[0] == 0xC1 && data[1] == 0x83 && data[2] == 0x2A && data[3] == 0x9E) { packages++; zlibInPackages += Count(data, n, Zlib); }
             dxbc += c; if (c > 0) withDxbc++;
+            int bp = Count(data, n, BasePass); basePass += bp; if (bp > 0) { basePassFiles++; if (n > biggest) { biggest = n; biggestAt = string.Format("{0:N0} B at {1}{2}", n, pos, data[0] == 0xC1 && data[1] == 0x83 ? " (package)" : ""); } }
+            globalCache += Count(data, n, GlobalCache); shaderCode += Count(data, n, ShaderCode) + Count(data, n, ShaderArchive);
           }
         }
         pos = e.Next;
@@ -96,6 +108,7 @@ public static class PakWalk {
     if (encrypted > 0) { sb.AppendFormat("  ENCRYPTED: {0} files, {1:N0} bytes stored\n", encrypted, encBytes); foreach (var x in encList) sb.Append("    " + x + "\n"); }
     if (headersOnly) return sb.ToString();
     sb.AppendFormat("  encrypted {0}, too big {1}, decompress failed {2}, packages {3}, zlib marks in packages {4}\n  DXBC: {5} containers in {6} files\n", encrypted, skipped, failed, packages, zlibInPackages, dxbc, withDxbc);
+    sb.AppendFormat("  BasePassPS: {0} in {1} files (largest {2}); GlobalShaderCache: {3}; ShaderCode/ShaderArchive: {4}\n", basePass, basePassFiles, biggestAt, globalCache, shaderCode);
     return sb.ToString();
   }
 }
@@ -109,6 +122,17 @@ if ($Encrypted) {  # every pak, headers only: which files are encrypted, and how
         if ($out -match 'ENCRYPTED|lost track|no v4 footer') { $out }
     }
     "$($all.Count) paks walked"
+    return
+}
+if ($Scan) {  # every pak but textures, sound, localization and animations, decompressed: where the shaders are
+    $all = Get-ChildItem $Paks -Filter *.pak | Where-Object Name -notmatch '_tex|_sound|_localize|_animations' | Sort-Object Length; $i = 0
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    foreach ($p in $all) {
+        $i++; Write-Progress -Activity "Scanning paks ($i of $($all.Count), $([int]$sw.Elapsed.TotalMinutes) min)" -Status $p.Name -PercentComplete (100 * $i / $all.Count)
+        $out = [PakWalk]::Walk($p.FullName, 600)
+        if ($out -match 'DXBC: [1-9]|BasePassPS: [1-9]|GlobalShaderCache: [1-9]|ShaderArchive: [1-9]|lost track|time limit|decompress failed [1-9]') { $out }
+    }
+    "$($all.Count) paks scanned in $([int]$sw.Elapsed.TotalMinutes) min"
     return
 }
 foreach ($n in $Names) {

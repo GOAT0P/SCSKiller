@@ -3,8 +3,8 @@
 param([switch]$Encrypted, [switch]$Scan, [switch]$All, [switch]$Oodle, [string]$Paks = "C:\Program Files (x86)\Steam\steamapps\common\PUBG\TslGame\Content\Paks", [int]$Seconds = 60,
       [string[]]$Names = @("pakchunk0-WindowsNoEditor.pak", "pakchunk0-WindowsNoEditor_etc.pak", "pakchunk0-WindowsNoEditor_fx.pak",
                            "pakchunk0-WindowsNoEditor_bps.pak", "pakchunk0-WindowsNoEditor_assets_world.pak", "pakchunk0-WindowsNoEditor_mutable.pak"))
-$oodle = Join-Path $env:LOCALAPPDATA "SCSKiller-build\codecs\oodle-data-shared.dll"
-if (-not (Test-Path $oodle)) { throw "no $oodle : run build\publish.ps1 once first" }
+$oodleDll = Join-Path $env:LOCALAPPDATA "SCSKiller-build\codecs\oodle-data-shared.dll"
+if (-not (Test-Path $oodleDll)) { throw "no $oodleDll : run build\publish.ps1 once first" }
 $src = @'
 using System; using System.IO; using System.IO.Compression; using System.Runtime.InteropServices; using System.Collections.Generic; using System.Diagnostics; using System.Text;
 public static class PakWalk {
@@ -137,7 +137,7 @@ public static class PakWalk {
   }
 }
 '@
-if (-not ("PakWalk" -as [type])) { Add-Type -TypeDefinition ($src -replace 'oodle-not-used', $oodle) }
+if (-not ("PakWalk" -as [type])) { Add-Type -TypeDefinition ($src -replace 'oodle-not-used', $oodleDll) }
 if ($Encrypted) {  # every pak, headers only: which files are encrypted, and how big
     $list = @(Get-ChildItem $Paks -Filter *.pak | Sort-Object Name); $i = 0
     foreach ($p in $list) {

@@ -115,26 +115,25 @@ public static class PakWalk {
 '@
 if (-not ("PakWalk" -as [type])) { Add-Type -TypeDefinition ($src -replace 'oodle-not-used', $oodle) }
 if ($Encrypted) {  # every pak, headers only: which files are encrypted, and how big
-    $all = Get-ChildItem $Paks -Filter *.pak | Sort-Object Name; $i = 0
-    foreach ($p in $all) {
-        $i++; Write-Progress -Activity "Walking pak headers" -Status $p.Name -PercentComplete (100 * $i / $all.Count)
+    $list = @(Get-ChildItem $Paks -Filter *.pak | Sort-Object Name); $i = 0
+    foreach ($p in $list) {
+        $i++; Write-Progress -Activity "Walking pak headers" -Status $p.Name -PercentComplete (100 * $i / $list.Count)
         $out = [PakWalk]::Walk($p.FullName, $Seconds, $true)
         if ($out -match 'ENCRYPTED|lost track|no v4 footer') { $out }
     }
-    "$($all.Count) paks walked"
+    "$($list.Count) paks walked"
     return
 }
-if ($Scan) {  # every pak but textures, sound, localization and animations, decompressed: where the shaders are
-    $skip = if ($All) { '^$' } else { '_tex|_sound|_localize|_animations' }
-    $all = Get-ChildItem $Paks -Filter *.pak | Where-Object { $All -or $_.Name -notmatch $skip } | Sort-Object Length; $i = 0
-    if ($All) { $all = $all | Where-Object Name -match '_tex|_sound|_localize|_animations' }  # the ones -Scan left out
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    foreach ($p in $all) {
-        $i++; Write-Progress -Activity "Scanning paks ($i of $($all.Count), $([int]$sw.Elapsed.TotalMinutes) min)" -Status $p.Name -PercentComplete (100 * $i / $all.Count)
+if ($Scan) {  # every pak but textures, sound, localization and animations, decompressed: where the shaders are; -All: only those
+    $left = '_tex|_sound|_localize|_animations'
+    $list = @(Get-ChildItem $Paks -Filter *.pak | Where-Object { if ($All) { $_.Name -match $left } else { $_.Name -notmatch $left } } | Sort-Object Length)
+    $i = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
+    foreach ($p in $list) {
+        $i++; Write-Progress -Activity "Scanning paks ($i of $($list.Count), $([int]$sw.Elapsed.TotalMinutes) min)" -Status $p.Name -PercentComplete (100 * $i / $list.Count)
         $out = [PakWalk]::Walk($p.FullName, 600)
         if ($out -match 'DXBC: [1-9]|BasePassPS: [1-9]|GlobalShaderCache: [1-9]|ShaderArchive: [1-9]|lost track|time limit|decompress failed [1-9]') { $out }
     }
-    "$($all.Count) paks scanned in $([int]$sw.Elapsed.TotalMinutes) min"
+    "$($list.Count) paks scanned in $([int]$sw.Elapsed.TotalMinutes) min"
     return
 }
 foreach ($n in $Names) {
